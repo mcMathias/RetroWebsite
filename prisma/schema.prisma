@@ -614,3 +614,17 @@ enum NotificationType {
   REVIEW_APPROVED
   SYSTEM
 }
+
+// ============================================================================
+// Waitlist - Landing Page Signups
+// ============================================================================
+
+model WaitlistSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  source    String?  @default("landing_page") // Where did they sign up from
+  createdAt DateTime @default(now())
+
+  @@map("waitlist_subscribers")
+}
