@@ -174,7 +174,7 @@ export async function getProductImages(productId: string): Promise<UploadedImage
     orderBy: { position: "asc" },
   });
 
-  return images.map((img) => {
+  return images.map((img: { id: string; productId: string; url: string; alt: string | null; position: number; width: number | null; height: number | null }) => {
     // Derive variant URLs from the stored URL
     const baseUrl = img.url.replace("/large/", "");
     return {
