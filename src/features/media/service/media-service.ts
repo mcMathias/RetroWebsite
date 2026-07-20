@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import type { ProductImage } from "@prisma/client";
 import {
   uploadToS3,
   deleteFromS3,
@@ -126,7 +127,7 @@ export async function deleteProductImage(imageId: string): Promise<void> {
   });
 
   await Promise.all(
-    remaining.map((img, index) =>
+    remaining.map((img: ProductImage, index: number) =>
       db.productImage.update({
         where: { id: img.id },
         data: { position: index },
