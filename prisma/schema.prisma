@@ -1,0 +1,616 @@
+// ============================================================================
+// RetroShop - Database Schema
+// ============================================================================
+// Architecture decisions:
+// - All monetary values stored as integers (øre) to avoid floating-point issues
+// - Soft deletes via deletedAt where business requires audit trail
+// - Composite indexes for common query patterns
+// - Separate tables for inventory location to support warehouse management
+// - Auth.js compatible schema for authentication
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// Authentication (Auth.js compatible)
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          UserRole  @default(CUSTOMER)
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  orders        Order[]
+  reviews       Review[]
+  wishlistItems WishlistItem[]
+  addresses     Address[]
+  notifications Notification[]
+  auditLogs     AuditLog[]     @relation("AuditUser")
+  cart          Cart?
+
+  @@map("users")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// User Data
+// ============================================================================
+
+model Address {
+  id         String      @id @default(cuid())
+  userId     String
+  type       AddressType @default(SHIPPING)
+  name       String
+  company    String?
+  street     String
+  street2    String?
+  city       String
+  state      String?
+  postalCode String
+  country    String      @default("DK")
+  phone      String?
+  isDefault  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingOrders Order[] @relation("ShippingAddress")
+  billingOrders  Order[] @relation("BillingAddress")
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+// ============================================================================
+// Products
+// ============================================================================
+
+model Product {
+  id          String           @id @default(cuid())
+  sku         String           @unique
+  barcode     String?
+  title       String
+  slug        String           @unique
+  description String?
+  platform    Platform
+  condition   ProductCondition
+  region      Region           @default(PAL)
+
+  // Completeness
+  isOriginal      Boolean @default(true)
+  hasManual       Boolean @default(false)
+  hasBox          Boolean @default(false)
+  isCib           Boolean @default(false) // Complete In Box
+
+  // Pricing (stored in øre - 1 DKK = 100 øre)
+  priceInOre      Int
+  salePriceInOre  Int?
+  costPriceInOre  Int? // Purchase price for profit calculation
+
+  // Inventory
+  quantity    Int     @default(0)
+  lowStockAt  Int     @default(2)
+  weight      Int?    // grams
+  isPublished Boolean @default(false)
+  isFeatured  Boolean @default(false)
+
+  // Reports
+  testReport     String?
+  cleaningReport String?
+
+  // Metadata
+  videoUrl    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+  deletedAt   DateTime?
+
+  // Relations
+  images         ProductImage[]
+  tags           ProductTag[]
+  categories     ProductCategory[]
+  reviews        Review[]
+  orderItems     OrderItem[]
+  wishlistItems  WishlistItem[]
+  cartItems      CartItem[]
+  inventoryLocation InventoryLocation?
+  relatedTo      ProductRelation[]  @relation("RelatedFrom")
+  relatedFrom    ProductRelation[]  @relation("RelatedTo")
+  supplier       Supplier?          @relation(fields: [supplierId], references: [id])
+  supplierId     String?
+  purchaseDate   DateTime?
+  serialNumber   String?
+  stockNotifications StockNotification[]
+  productHistory ProductHistory[]
+
+  @@index([platform])
+  @@index([condition])
+  @@index([isPublished, deletedAt])
+  @@index([slug])
+  @@index([priceInOre])
+  @@index([createdAt])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  position  Int     @default(0)
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model ProductRelation {
+  id        String @id @default(cuid())
+  fromId    String
+  toId      String
+
+  from Product @relation("RelatedFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   Product @relation("RelatedTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@map("product_relations")
+}
+
+model ProductHistory {
+  id        String   @id @default(cuid())
+  productId String
+  action    String
+  details   Json?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@map("product_history")
+}
+
+// ============================================================================
+// Categories & Tags
+// ============================================================================
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  image       String?
+  parentId    String?
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products ProductCategory[]
+
+  @@index([parentId])
+  @@index([slug])
+  @@map("categories")
+}
+
+model ProductCategory {
+  productId  String
+  categoryId String
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@map("product_categories")
+}
+
+model Tag {
+  id       String       @id @default(cuid())
+  name     String       @unique
+  slug     String       @unique
+  products ProductTag[]
+
+  @@map("tags")
+}
+
+model ProductTag {
+  productId String
+  tagId     String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([productId, tagId])
+  @@map("product_tags")
+}
+
+// ============================================================================
+// Inventory & Warehouse
+// ============================================================================
+
+model InventoryLocation {
+  id        String  @id @default(cuid())
+  productId String  @unique
+  shelf     String?
+  row       String?
+  box       String?
+  code      String? @unique // Combined location code e.g. "A-3-12"
+  notes     String?
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_locations")
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  email     String?
+  phone     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@map("suppliers")
+}
+
+// ============================================================================
+// Orders
+// ============================================================================
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  userId          String
+  status          OrderStatus @default(PENDING)
+
+  // Pricing (øre)
+  subtotalInOre   Int
+  shippingInOre   Int         @default(0)
+  discountInOre   Int         @default(0)
+  totalInOre      Int
+
+  // Payment
+  stripePaymentId   String?
+  stripeSessionId   String?
+  paidAt            DateTime?
+
+  // Shipping
+  shippingMethod    String?
+  shippingCarrier   String?
+  trackingNumber    String?
+  trackingUrl       String?
+  shippingLabelUrl  String?
+  shipmondoId       String?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+
+  // Addresses
+  shippingAddressId String?
+  billingAddressId  String?
+
+  // Notes
+  customerNote String?
+  internalNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user            User      @relation(fields: [userId], references: [id])
+  shippingAddress Address?  @relation("ShippingAddress", fields: [shippingAddressId], references: [id])
+  billingAddress  Address?  @relation("BillingAddress", fields: [billingAddressId], references: [id])
+  items           OrderItem[]
+  history         OrderHistory[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([orderNumber])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String @id @default(cuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  priceInOre Int   // Price at time of purchase
+  title      String // Snapshot of product title
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderHistory {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  note      String?
+  userId    String?     // Who made the change
+  createdAt DateTime    @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_history")
+}
+
+// ============================================================================
+// Cart
+// ============================================================================
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String  @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int     @default(1)
+  createdAt DateTime @default(now())
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+// ============================================================================
+// Reviews
+// ============================================================================
+
+model Review {
+  id        String  @id @default(cuid())
+  productId String
+  userId    String
+  rating    Int     // 1-5
+  title     String?
+  body      String?
+  isVerified Boolean @default(false) // Verified purchase
+  isApproved Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@index([productId, isApproved])
+  @@map("reviews")
+}
+
+// ============================================================================
+// Wishlist
+// ============================================================================
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("wishlist_items")
+}
+
+// ============================================================================
+// Notifications
+// ============================================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model StockNotification {
+  id        String   @id @default(cuid())
+  email     String
+  productId String
+  notified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([email, productId])
+  @@index([productId, notified])
+  @@map("stock_notifications")
+}
+
+// ============================================================================
+// Audit Log
+// ============================================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation("AuditUser", fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+  CUSTOMER
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+}
+
+enum Platform {
+  NES
+  SNES
+  N64
+  GAMECUBE
+  WII
+  WII_U
+  SWITCH
+  GAME_BOY
+  GAME_BOY_COLOR
+  GAME_BOY_ADVANCE
+  NINTENDO_DS
+  NINTENDO_3DS
+  PS1
+  PS2
+  PS3
+  PS4
+  PS5
+  PSP
+  PS_VITA
+  XBOX
+  XBOX_360
+  XBOX_ONE
+  XBOX_SERIES
+  MASTER_SYSTEM
+  MEGA_DRIVE
+  SATURN
+  DREAMCAST
+  GAME_GEAR
+}
+
+enum ProductCondition {
+  MINT
+  NEAR_MINT
+  VERY_GOOD
+  GOOD
+  ACCEPTABLE
+  POOR
+  FOR_PARTS
+}
+
+enum Region {
+  PAL
+  NTSC_U
+  NTSC_J
+  REGION_FREE
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PACKING
+  READY
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum NotificationType {
+  ORDER_CONFIRMATION
+  ORDER_SHIPPED
+  ORDER_DELIVERED
+  STOCK_ALERT
+  REVIEW_APPROVED
+  SYSTEM
+}
