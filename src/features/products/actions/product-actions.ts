@@ -11,6 +11,7 @@ import {
 import { getProducts, type ProductListParams } from "@/features/products/repository";
 import { actionSuccess, actionError, type ActionResult } from "@/lib/errors";
 import { type ProductWithImages } from "@/features/products/repository";
+import { requireRole } from "@/lib/auth/helpers";
 
 /**
  * Server Action: Create a new product.
@@ -19,6 +20,8 @@ export async function createProductAction(
   formData: unknown,
 ): Promise<ActionResult<ProductWithImages>> {
   try {
+    await requireRole("ADMIN", "EMPLOYEE");
+
     const parsed = createProductSchema.safeParse(formData);
     if (!parsed.success) {
       const fieldErrors: Record<string, string[]> = {};
@@ -49,6 +52,8 @@ export async function updateProductAction(
   formData: unknown,
 ): Promise<ActionResult<ProductWithImages>> {
   try {
+    await requireRole("ADMIN", "EMPLOYEE");
+
     const parsed = updateProductSchema.safeParse(formData);
     if (!parsed.success) {
       const fieldErrors: Record<string, string[]> = {};
@@ -79,6 +84,8 @@ export async function deleteProductAction(
   id: string,
 ): Promise<ActionResult<void>> {
   try {
+    await requireRole("ADMIN", "EMPLOYEE");
+
     await deleteProductService(id);
     revalidatePath("/admin/products");
     return actionSuccess(undefined);
@@ -97,6 +104,8 @@ export async function deleteProductsAction(
   ids: string[],
 ): Promise<ActionResult<void>> {
   try {
+    await requireRole("ADMIN", "EMPLOYEE");
+
     if (ids.length === 0) {
       return actionError("No products selected");
     }

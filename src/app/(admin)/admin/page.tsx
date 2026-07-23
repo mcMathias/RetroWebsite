@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { StatCard } from "@/components/shared/stat-card";
 import { RecentListCard } from "@/components/shared/recent-list-card";
+import { requireAdmin } from "@/lib/auth/helpers";
 
 /**
  * Admin dashboard page.
@@ -18,7 +19,9 @@ import { RecentListCard } from "@/components/shared/recent-list-card";
  * Currently using placeholder data — will be connected to real queries
  * once the service layer is built.
  */
-export default function AdminDashboardPage() {
+export default async function AdminDashboardPage() {
+  await requireAdmin();
+
   // TODO: Replace with real data from dashboard service
   const stats = {
     todayOrders: 3,

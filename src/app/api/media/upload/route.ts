@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uploadProductImage } from "@/features/media/service";
 import { validateImageFile } from "@/lib/storage";
+import { auth } from "@/lib/auth";
 
 /**
  * POST /api/media/upload
@@ -10,19 +11,19 @@ import { validateImageFile } from "@/lib/storage";
  *   - file: The image file
  *   - productId: The product to attach the image to
  *
- * Flow:
- * 1. Parse multipart form data
- * 2. Validate file (size, type, magic bytes)
- * 3. Process image (resize, WebP conversion)
- * 4. Upload all variants to S3
- * 5. Save metadata to database
- * 6. Return image data
- *
- * Security: In production, add auth middleware to verify
- * the user has permission to upload to this product.
+ * Security: Requires ADMIN or EMPLOYEE role.
  */
 export async function POST(request: NextRequest) {
   try {
+    // Auth check
+    const session = await auth();
+    if (!session?.user || (session.user.role !== "ADMIN" && session.user.role !== "EMPLOYEE")) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const productId = formData.get("productId") as string | null;

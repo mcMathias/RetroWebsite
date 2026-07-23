@@ -7,6 +7,7 @@ import { ProductTable } from "@/features/products/components";
 import { EmptyState } from "@/components/shared";
 import { Package } from "lucide-react";
 import { getProducts } from "@/features/products/repository";
+import { requireAdmin } from "@/lib/auth/helpers";
 
 interface ProductsPageProps {
   searchParams: Promise<{
@@ -18,6 +19,7 @@ interface ProductsPageProps {
 }
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
+  await requireAdmin();
   const params = await searchParams;
   const page = parseInt(params.page ?? "1", 10);
   const search = params.search ?? "";
